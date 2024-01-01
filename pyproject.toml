@@ -1,0 +1,37 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=61", "setuptools_scm[toml]>=7"]
+
+[project]
+name = "bscal"
+readme = "README.md"
+description = "Calendar for Bikram Sambat"
+license = { text = "Apache License 2.0" }
+requires-python = ">=3.8"
+classifiers = ["Programming Language :: Python :: 3"]
+dynamic = ["version"]
+
+[project.scripts]
+bscal = "bscal:main"
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[tool.setuptools_scm]
+
+[tool.ruff]
+ignore = ["ISC001"]
+select = [
+    "F", "E", "W", "C90", "I", "N", "UP", "YTT", "ASYNC", "S", "BLE", "B", "A", "C4", "T10",
+    "EXE", "ISC", "ICN", "G", "INP", "PIE", "PYI", "PT", "Q", "RSE", "RET",
+    "SLOT", "SIM", "TID", "TCH", "ARG", "PGH", "PLC", "PLE", "PLR", "PLW", "TRY",
+    "FLY", "PERF101", "RUF",
+]
+show-source = true
+show-fixes = true
+
+[tool.ruff.flake8-type-checking]
+strict = true
+
+[tool.ruff.flake8-unused-arguments]
+ignore-variadic-names = true
