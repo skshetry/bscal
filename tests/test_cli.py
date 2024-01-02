@@ -1,6 +1,6 @@
 import pytest
 
-from bscal import main
+from bscal import cal
 
 results_2080_poush = """\
      Poush 2080
@@ -61,7 +61,7 @@ Su Mo Tu We Th Fr Sa      Su Mo Tu We Th Fr Sa      Su Mo Tu We Th Fr Sa
     ],
 )
 def test_cli(capsys, args, expected):
-    main(args)
+    cal(args)
     out, err = capsys.readouterr()
     assert out == expected
     assert not err

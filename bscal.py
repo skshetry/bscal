@@ -1,7 +1,8 @@
 import calendar
-from datetime import date, timedelta
+import contextlib
+from datetime import date, datetime, timedelta
 from itertools import repeat
-from typing import Optional, Tuple
+from typing import Iterator, Optional, Sequence, Tuple
 
 lookup = {
     # bs_year: [days_in_each_month, ...]
@@ -316,19 +317,21 @@ def ad_to_bs(ad: date, start: Optional[int] = None) -> Tuple[int, int, int]:
 
 
 class BSCalendar(calendar.TextCalendar):
-    def __init__(self, firstweekday: int = 0, to_highlight=()) -> None:
+    def __init__(self, firstweekday: int = 0, to_highlight: Tuple[int, ...] = ()):
         super().__init__(firstweekday)
         self._to_highlight = to_highlight
-        self._formatting = ()
+        self._formatting_ctx: Tuple[int, ...] = ()
 
-    def formatmonthname(self, theyear, themonth, width, withyear=True):
+    def formatmonthname(
+        self, theyear: int, themonth: int, width: int, withyear: bool = True
+    ) -> str:
         """Return a formatted month name."""
         s = months[themonth - 1]
         if withyear:
             s = f"{s} {theyear!r}"
         return s.center(width)
 
-    def itermonthdays(self, year, month):
+    def itermonthdays(self, year: int, month: int) -> Iterator[int]:
         """Like itermonthdates(), but will yield day numbers. For days outside
         the specified month the day number is 0.
         """
@@ -342,17 +345,63 @@ class BSCalendar(calendar.TextCalendar):
         yield from repeat(0, days_after)
 
     def formatmonth(self, theyear: int, themonth: int, w: int = 0, l: int = 0) -> str:  # noqa: E741
-        self._formatting = (theyear, themonth)
+        self._formatting_ctx = (theyear, themonth)
         return super().formatmonth(theyear, themonth, w, l)
 
     def formatday(self, day: int, weekday: int, width: int) -> str:
         s = super().formatday(day, weekday, width)
-        if (*self._formatting, day) == self._to_highlight:
+        if (*self._formatting_ctx, day) == self._to_highlight:
             s = f"\033[30;47m{s}\033[0m"
         return s
 
 
-def main(args=None):
+def bsconv(bs_datestring: str) -> None:
+    ad = bs_to_ad(*map(int, bs_datestring.split("-")[:3]))
+    ad_tz = datetime.combine(ad, datetime.now().time()).astimezone()
+    print(ad_tz.strftime("%a %b %e %T %Z %Y"))
+
+
+def bsdate(args: Optional[Sequence[str]] = None) -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-c",
+        required=False,
+        metavar="<bs_date>",
+        help="Convert BS date to AD format",
+        dest="convert",
+    )
+    parser.add_argument(
+        "date",
+        nargs="?",
+        metavar="STRING",
+        help="Convert given datetime string (isoformat/unix-timestamp) to BS format",
+    )
+    opt = parser.parse_args(args)
+    if opt.convert:
+        bsconv(opt.convert)
+        return
+
+    dt: Optional[datetime] = None
+    if opt.date:
+        with contextlib.suppress(ValueError):
+            dt = datetime.fromtimestamp(int(opt.date.lstrip("@")))
+    if not dt and opt.date:
+        try:
+            _date = date.fromisoformat(opt.date)
+        except ValueError:
+            dt = datetime.fromisoformat(opt.date)
+        else:
+            dt = datetime.combine(_date, datetime.now().time())
+
+    dt = dt or datetime.now()
+    dt = dt.astimezone()
+    year, month, day = ad_to_bs(dt.date())
+    print(dt.strftime("%a"), months[month - 1], day, dt.strftime("%T %Z"), year)
+
+
+def cal(args: Optional[Sequence[str]] = None) -> None:
     import argparse
     import sys
 
@@ -364,16 +413,16 @@ def main(args=None):
         type=int,
         help="month number (1-12, text only)",
     )
-    args = parser.parse_args(args)
+    opt = parser.parse_args(args)
 
     year, month, day = ad_to_bs(date.today())
     cal = BSCalendar(6, to_highlight=(year, month, day) if sys.stdout.isatty() else ())
-    if not args.year or args.month:
-        result = cal.formatmonth(args.year or year, args.month or month)
+    if not opt.year or opt.month:
+        result = cal.formatmonth(opt.year or year, opt.month or month)
     else:
-        result = cal.formatyear(args.year)
+        result = cal.formatyear(opt.year)
     print(result)
 
 
 if __name__ == "__main__":
-    main()
+    cal()
