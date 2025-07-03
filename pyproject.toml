@@ -6,7 +6,8 @@ requires = ["setuptools>=77", "setuptools_scm[toml]>=8"]
 name = "bscal"
 readme = "README.md"
 description = "Calendar for Bikram Sambat"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 classifiers = ["Programming Language :: Python :: 3"]
 dynamic = ["version"]
