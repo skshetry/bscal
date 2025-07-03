@@ -1,13 +1,13 @@
 [build-system]
 build-backend = "setuptools.build_meta"
-requires = ["setuptools>=61", "setuptools_scm[toml]>=7"]
+requires = ["setuptools>=77", "setuptools_scm[toml]>=8"]
 
 [project]
 name = "bscal"
 readme = "README.md"
 description = "Calendar for Bikram Sambat"
 license = { text = "MIT" }
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 classifiers = ["Programming Language :: Python :: 3"]
 dynamic = ["version"]
 
@@ -15,35 +15,43 @@ dynamic = ["version"]
 bscal = "bscal:cal"
 bsdate = "bscal:bsdate"
 
-[project.optional-dependencies]
+[dependency-groups]
 tests = ["pytest", "hypothesis"]
-
-[tool.setuptools]
-license-files = ["LICENSE"]
+dev = [{ include-group = 'tests' }]
 
 [tool.setuptools_scm]
 
 [tool.mypy]
 check_untyped_defs = true
-files = ["bscal.py"]
+files = ["bscal.py", "tests"]
 strict = true
 
 [tool.ruff]
-ignore = ["ISC001", "S101"]
-select = [
-    "F", "E", "W", "C90", "I", "N", "UP", "YTT", "ASYNC", "S", "BLE", "B", "A", "C4", "T10",
-    "EXE", "ISC", "ICN", "G", "INP", "PIE", "PYI", "PT", "Q", "RSE", "RET",
-    "SLOT", "SIM", "TID", "TCH", "ARG", "PGH", "PLC", "PLE", "PLR", "PLW", "TRY",
-    "FLY", "PERF101", "RUF",
-]
-show-source = true
+output-format = "full"
 show-fixes = true
+
+[tool.ruff.lint]
+ignore = [
+    "ISC001",
+    "S101",
+    "PLC0415",
+    "D1",
+    "FA",
+    "T201",
+    "EM",
+    "FBT",
+    "ERA",
+    "D2",
+    "DTZ",
+    "COM",
+]
+select = ["ALL"]
 
 [tool.ruff.format]
 preview = true
 
-[tool.ruff.flake8-type-checking]
+[tool.ruff.lint.flake8-type-checking]
 strict = true
 
-[tool.ruff.flake8-unused-arguments]
+[tool.ruff.lint.flake8-unused-arguments]
 ignore-variadic-names = true

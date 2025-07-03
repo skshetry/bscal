@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  pre-commit:
+  tests:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -24,7 +24,8 @@ jobs:
         fetch-depth: 0
     - uses: actions/setup-python@v5
       with:
-        python-version: "3.8"
-    - uses: pre-commit/action@v3.0.0
-    - run: pip install -e ".[tests]"
+        python-version: "3.9"
+    - uses: astral-sh/setup-uv@v6
+    - uses: tox-dev/action-pre-commit-uv@v1
+    - run: uv pip install . --group tests --system
     - run: pytest

@@ -60,7 +60,11 @@ Su Mo Tu We Th Fr Sa      Su Mo Tu We Th Fr Sa      Su Mo Tu We Th Fr Sa
         (("2080",), results_2080),
     ],
 )
-def test_cli(capsys, args, expected):
+def test_cli(
+    capsys: pytest.CaptureFixture[str],
+    args: tuple[str, str],
+    expected: str,
+) -> None:
     cal(args)
     out, err = capsys.readouterr()
     assert out == expected

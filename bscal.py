@@ -1,8 +1,9 @@
 import calendar
 import contextlib
+from collections.abc import Iterator, Sequence
 from datetime import date, datetime, timedelta
 from itertools import repeat
-from typing import Iterator, Optional, Sequence, Tuple
+from typing import Optional
 
 lookup = {
     # bs_year: [days_in_each_month, ...]
@@ -295,7 +296,7 @@ def bs_to_ad(year: int, month: int, day: int) -> date:
     return new_years[year] + timedelta(days)
 
 
-def ad_to_bs(ad: date, start: Optional[int] = None) -> Tuple[int, int, int]:
+def ad_to_bs(ad: date, start: Optional[int] = None) -> tuple[int, int, int]:
     start = start or next(iter(lookup))
     difference = ad - new_years[start]
     for year, months_data in lookup.items():
@@ -317,10 +318,12 @@ def ad_to_bs(ad: date, start: Optional[int] = None) -> Tuple[int, int, int]:
 
 
 class BSCalendar(calendar.TextCalendar):
-    def __init__(self, firstweekday: int = 0, to_highlight: Tuple[int, ...] = ()):
+    def __init__(
+        self, firstweekday: int = 0, to_highlight: tuple[int, ...] = ()
+    ) -> None:
         super().__init__(firstweekday)
         self._to_highlight = to_highlight
-        self._formatting_ctx: Tuple[int, ...] = ()
+        self._formatting_ctx: tuple[int, ...] = ()
 
     def formatmonthname(
         self, theyear: int, themonth: int, width: int, withyear: bool = True
@@ -356,7 +359,8 @@ class BSCalendar(calendar.TextCalendar):
 
 
 def bsconv(bs_datestring: str) -> None:
-    ad = bs_to_ad(*map(int, bs_datestring.split("-")[:3]))
+    year, month, day, *_ = map(int, bs_datestring.split("-"))
+    ad = bs_to_ad(year, month, day)
     ad_tz = datetime.combine(ad, datetime.now().time()).astimezone()
     print(ad_tz.strftime("%a %b %e %T %Z %Y"))
 
