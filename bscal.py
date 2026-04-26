@@ -1,8 +1,6 @@
 import calendar
-import contextlib
 from collections.abc import Iterator, Sequence
 from datetime import date, datetime, timedelta
-from itertools import repeat
 from typing import Optional
 
 lookup = {
@@ -120,7 +118,7 @@ lookup = {
     2080: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
     2081: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
     2082: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
-    2083: [31, 31, 32, 31, 31, 30, 30, 30, 29, 30, 30, 30],
+    2083: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
     2084: [31, 31, 32, 31, 31, 30, 30, 30, 29, 30, 30, 30],
     2085: [31, 32, 31, 32, 30, 31, 30, 30, 29, 30, 30, 30],
     2086: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
@@ -291,47 +289,49 @@ months = [
 
 
 def bs_to_ad(year: int, month: int, day: int) -> date:
+    if year not in lookup:
+        raise ValueError(f"year {year} outside of range")  # noqa: TRY003
     months_data = lookup[year]
+    if not 1 <= month <= 12:  # noqa: PLR2004
+        raise ValueError(f"month {month} outside [1, 12]")  # noqa: TRY003
+    if not 1 <= day <= months_data[month - 1]:
+        raise ValueError(  # noqa: TRY003
+            f"day {day} outside [1, {months_data[month - 1]}] for {year}-{month}"
+        )
     days = sum(months_data[: month - 1]) + day - 1
     return new_years[year] + timedelta(days)
 
 
-def ad_to_bs(ad: date, start: Optional[int] = None) -> tuple[int, int, int]:
-    start = start or next(iter(lookup))
-    difference = ad - new_years[start]
-    for year, months_data in lookup.items():
-        if year < start:
-            continue
-        days_in_year = sum(months_data)
-        if difference.days < days_in_year:
-            break
-        difference -= timedelta(days_in_year)
-    else:
-        raise AssertionError("outside of range")  # noqa: TRY003
+def ad_to_bs(ad: date) -> tuple[int, int, int]:
+    first_year = next(iter(lookup))
+    diff = (ad - new_years[first_year]).days
+    if diff < 0:
+        raise ValueError("outside of range")  # noqa: TRY003
 
-    month = 1
-    for month, days in enumerate(months_data, start=1):  # noqa: B007
-        if difference.days < days:
+    for year, months_data in lookup.items():  # noqa: B007
+        days_in_year = sum(months_data)
+        if diff < days_in_year:
             break
-        difference -= timedelta(days)
-    return year, month, difference.days + 1
+        diff -= days_in_year
+    else:
+        raise ValueError("outside of range")  # noqa: TRY003
+
+    assert len(months_data) == 12  # noqa: PLR2004
+    for month, days in enumerate(months_data, start=1):  # noqa: B007
+        if diff < days:
+            break
+        diff -= days
+    return year, month, diff + 1
 
 
 class BSCalendar(calendar.TextCalendar):
-    def __init__(
-        self, firstweekday: int = 0, to_highlight: tuple[int, ...] = ()
-    ) -> None:
-        super().__init__(firstweekday)
-        self._to_highlight = to_highlight
-        self._formatting_ctx: tuple[int, ...] = ()
-
     def formatmonthname(
         self, theyear: int, themonth: int, width: int, withyear: bool = True
     ) -> str:
         """Return a formatted month name."""
         s = months[themonth - 1]
         if withyear:
-            s = f"{s} {theyear!r}"
+            s = f"{s} {theyear}"
         return s.center(width)
 
     def itermonthdays(self, year: int, month: int) -> Iterator[int]:
@@ -339,22 +339,46 @@ class BSCalendar(calendar.TextCalendar):
         the specified month the day number is 0.
         """
         ndays = lookup[year][month - 1]
-        day1_dt = bs_to_ad(year, month, 1)
-        day1 = day1_dt.weekday()
+        day1 = bs_to_ad(year, month, 1).weekday()
         days_before = (day1 - self.firstweekday) % 7
-        yield from repeat(0, days_before)
-        yield from range(1, ndays + 1)
         days_after = (self.firstweekday - day1 - ndays) % 7
-        yield from repeat(0, days_after)
+        yield from [0] * days_before
+        yield from range(1, ndays + 1)
+        yield from [0] * days_after
 
-    def formatmonth(self, theyear: int, themonth: int, w: int = 0, l: int = 0) -> str:  # noqa: E741
-        self._formatting_ctx = (theyear, themonth)
-        return super().formatmonth(theyear, themonth, w, l)
 
-    def formatday(self, day: int, weekday: int, width: int) -> str:
-        s = super().formatday(day, weekday, width)
-        if (*self._formatting_ctx, day) == self._to_highlight:
-            s = f"\033[30;47m{s}\033[0m"
+class CLICalendar(BSCalendar):
+    def __init__(
+        self,
+        highlight_day: Optional[tuple[int, int, int]] = None,
+        firstweekday: int = 0,
+    ) -> None:
+        super().__init__(firstweekday)
+        self.highlight_day = highlight_day
+
+    def monthdays2calendar(  # type: ignore[override]  # ty: ignore[invalid-method-override]
+        self, year: int, month: int
+    ) -> list[list[tuple[int, int, int, int]]]:
+        # Widen each cell with (year, month) so formatweek can highlight the
+        # right day in year view, where weeks from 12 months are interleaved.
+        # Assumes stdlib only unpacks cells inside formatweek (which we override).
+        weeks = super().monthdays2calendar(year, month)
+        return [[(d, wd, year, month) for (d, wd) in week] for week in weeks]
+
+    def formatweek(  # type: ignore[override]  # ty: ignore[invalid-method-override]
+        self, theweek: list[tuple[int, int, int, int]], width: int
+    ) -> str:
+        return " ".join(
+            self._formatday(d, wd, width, year, month)
+            for (d, wd, year, month) in theweek
+        )
+
+    def _formatday(
+        self, day: int, weekday: int, width: int, year: int, month: int
+    ) -> str:
+        s = self.formatday(day, weekday, width)
+        if self.highlight_day and day and self.highlight_day == (year, month, day):
+            return f"\033[30;43m{s}\033[0m"
         return s
 
 
@@ -388,10 +412,9 @@ def bsdate(args: Optional[Sequence[str]] = None) -> None:
         return
 
     dt: Optional[datetime] = None
-    if opt.date:
-        with contextlib.suppress(ValueError):
-            dt = datetime.fromtimestamp(int(opt.date.lstrip("@")))
-    if not dt and opt.date:
+    if opt.date and opt.date.startswith("@"):
+        dt = datetime.fromtimestamp(int(opt.date[1:]))
+    elif opt.date:
         try:
             _date = date.fromisoformat(opt.date)
         except ValueError:
@@ -399,7 +422,8 @@ def bsdate(args: Optional[Sequence[str]] = None) -> None:
         else:
             dt = datetime.combine(_date, datetime.now().time())
 
-    dt = dt or datetime.now()
+    if dt is None:
+        dt = datetime.now()
     dt = dt.astimezone()
     year, month, day = ad_to_bs(dt.date())
     print(dt.strftime("%a"), months[month - 1], day, dt.strftime("%T %Z"), year)
@@ -410,21 +434,75 @@ def cal(args: Optional[Sequence[str]] = None) -> None:
     import sys
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("year", nargs="?", type=int, help="year number (1-9999)")
     parser.add_argument(
-        "month",
+        "-w",
+        "--width",
+        type=int,
+        default=2,
+        help="width of date column (default 2)",
+    )
+    parser.add_argument(
+        "-l",
+        "--lines",
+        type=int,
+        default=1,
+        help="number of lines per week (default 1)",
+    )
+    parser.add_argument(
+        "-s",
+        "--spacing",
+        type=int,
+        default=6,
+        help="spacing between months in year view (default 6)",
+    )
+    parser.add_argument(
+        "-m",
+        "--months",
+        type=int,
+        default=3,
+        help="months per row in year view (default 3)",
+    )
+    parser.add_argument(
+        "-f",
+        "--first-weekday",
+        type=int,
+        default=6,
+        help="first day of week, 0=Mon..6=Sun (default 6)",
+    )
+    parser.add_argument(
+        "year",
         nargs="?",
         type=int,
-        help="month number (1-12, text only)",
+        help=f"year number ({min(lookup)}-{max(lookup)})",
     )
-    opt = parser.parse_args(args)
-
+    parser.add_argument("month", nargs="?", type=int, help="month number (1-12)")
+    opts = parser.parse_args(args)
+    if opts.year is not None and opts.year not in lookup:
+        parser.error(f"year {opts.year} outside [{min(lookup)}, {max(lookup)}]")
+    if opts.month is not None and not 1 <= opts.month <= 12:  # noqa: PLR2004
+        parser.error(f"month {opts.month} outside [1, 12]")
+    if not 0 <= opts.first_weekday <= 6:  # noqa: PLR2004
+        parser.error(f"first-weekday {opts.first_weekday} outside [0, 6]")
     year, month, day = ad_to_bs(date.today())
-    cal = BSCalendar(6, to_highlight=(year, month, day) if sys.stdout.isatty() else ())
-    if not opt.year or opt.month:
-        result = cal.formatmonth(opt.year or year, opt.month or month)
+    cal = CLICalendar(
+        (year, month, day) if sys.stdout.isatty() else None,
+        opts.first_weekday,
+    )
+    if not opts.year or opts.month:
+        result = cal.formatmonth(
+            opts.year or year,
+            opts.month or month,
+            w=opts.width,
+            l=opts.lines,
+        )
     else:
-        result = cal.formatyear(opt.year)
+        result = cal.formatyear(
+            opts.year,
+            w=opts.width,
+            l=opts.lines,
+            c=opts.spacing,
+            m=opts.months,
+        )
     print(result)
 
 

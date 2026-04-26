@@ -1,6 +1,9 @@
 import pytest
 
-from bscal import cal
+from bscal import CLICalendar, bsconv, bsdate, cal
+
+HIGHLIGHT = "\033[30;43m"
+RESET = "\033[0m"
 
 results_2080_poush = """\
      Poush 2080
@@ -69,3 +72,61 @@ def test_cli(
     out, err = capsys.readouterr()
     assert out == expected
     assert not err
+
+
+def test_month_view_highlights_target_day_only() -> None:
+    out = CLICalendar(highlight_day=(2080, 9, 5), firstweekday=6).formatmonth(2080, 9)
+    assert f"{HIGHLIGHT} 5{RESET}" in out
+    assert out.count(HIGHLIGHT) == 1
+
+
+def test_year_view_highlights_only_in_target_month() -> None:
+    # Day 5 also exists in every other month — verify only Poush 5 is highlighted.
+    out = CLICalendar(highlight_day=(2080, 9, 5), firstweekday=6).formatyear(2080)
+    assert out.count(HIGHLIGHT) == 1
+    assert f"{HIGHLIGHT} 5{RESET}" in out
+
+
+def test_no_highlight_when_unset() -> None:
+    out = CLICalendar(highlight_day=None, firstweekday=6).formatmonth(2080, 9)
+    assert HIGHLIGHT not in out
+
+
+# AD 2024-04-13 == BS 2081-01-01 (Baisakh 1, a Saturday)
+
+
+def test_bsdate_iso_date(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["2024-04-13"])
+    parts = capsys.readouterr().out.split()
+    assert parts[0] == "Sat"
+    assert parts[1] == "Baisakh"
+    assert parts[2] == "1"
+    assert parts[-1] == "2081"
+
+
+def test_bsdate_iso_datetime(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["2024-04-13T12:00:00"])
+    parts = capsys.readouterr().out.split()
+    assert parts[0] == "Sat"
+    assert parts[1] == "Baisakh"
+    assert parts[2] == "1"
+    assert parts[3] == "12:00:00"
+    assert parts[-1] == "2081"
+
+
+def test_bsdate_convert_bs_to_ad(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["-c", "2081-01-01"])
+    parts = capsys.readouterr().out.split()
+    assert parts[0] == "Sat"
+    assert parts[1] == "Apr"
+    assert parts[2] == "13"
+    assert parts[-1] == "2024"
+
+
+def test_bsconv(capsys: pytest.CaptureFixture[str]) -> None:
+    bsconv("2081-01-01")
+    parts = capsys.readouterr().out.split()
+    assert parts[0] == "Sat"
+    assert parts[1] == "Apr"
+    assert parts[2] == "13"
+    assert parts[-1] == "2024"
