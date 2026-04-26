@@ -1,7 +1,7 @@
-import calendar
-from collections.abc import Iterator, Sequence
-from datetime import date, datetime, timedelta
-from typing import Optional
+import sys
+from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta
+from typing import ClassVar, Union
 
 lookup = {
     # bs_year: [days_in_each_month, ...]
@@ -287,6 +287,11 @@ months = [
     "Chaitra",
 ]
 
+_first_bs_year = next(iter(lookup))
+_last_bs_year = next(reversed(lookup))
+_min_ad = new_years[_first_bs_year]
+_max_ad = new_years[_last_bs_year] + timedelta(days=sum(lookup[_last_bs_year]) - 1)
+
 
 def bs_to_ad(year: int, month: int, day: int) -> date:
     if year not in lookup:
@@ -303,18 +308,18 @@ def bs_to_ad(year: int, month: int, day: int) -> date:
 
 
 def ad_to_bs(ad: date) -> tuple[int, int, int]:
-    first_year = next(iter(lookup))
-    diff = (ad - new_years[first_year]).days
-    if diff < 0:
-        raise ValueError("outside of range")  # noqa: TRY003
+    diff = (ad - _min_ad).days
+    if diff < 0 or ad > _max_ad:
+        raise ValueError(  # noqa: TRY003
+            f"date {ad.isoformat()} outside "
+            f"[{_min_ad.isoformat()}, {_max_ad.isoformat()}]"
+        )
 
     for year, months_data in lookup.items():  # noqa: B007
         days_in_year = sum(months_data)
         if diff < days_in_year:
             break
         diff -= days_in_year
-    else:
-        raise ValueError("outside of range")  # noqa: TRY003
 
     assert len(months_data) == 12  # noqa: PLR2004
     for month, days in enumerate(months_data, start=1):  # noqa: B007
@@ -324,187 +329,157 @@ def ad_to_bs(ad: date) -> tuple[int, int, int]:
     return year, month, diff + 1
 
 
-class BSCalendar(calendar.TextCalendar):
-    def formatmonthname(
-        self, theyear: int, themonth: int, width: int, withyear: bool = True
-    ) -> str:
-        """Return a formatted month name."""
-        s = months[themonth - 1]
-        if withyear:
-            s = f"{s} {theyear}"
-        return s.center(width)
-
-    def itermonthdays(self, year: int, month: int) -> Iterator[int]:
-        """Like itermonthdates(), but will yield day numbers. For days outside
-        the specified month the day number is 0.
-        """
-        ndays = lookup[year][month - 1]
-        day1 = bs_to_ad(year, month, 1).weekday()
-        days_before = (day1 - self.firstweekday) % 7
-        days_after = (self.firstweekday - day1 - ndays) % 7
-        yield from [0] * days_before
-        yield from range(1, ndays + 1)
-        yield from [0] * days_after
+def _pad(value: int, width: int, mods: str) -> str:
+    if "-" in mods:
+        return str(value)
+    if "_" in mods:
+        return f"{value:>{width}d}"
+    return f"{value:0{width}d}"
 
 
-class CLICalendar(BSCalendar):
-    def __init__(
-        self,
-        highlight_day: Optional[tuple[int, int, int]] = None,
-        firstweekday: int = 0,
-    ) -> None:
-        super().__init__(firstweekday)
-        self.highlight_day = highlight_day
-
-    def monthdays2calendar(  # type: ignore[override]  # ty: ignore[invalid-method-override]
-        self, year: int, month: int
-    ) -> list[list[tuple[int, int, int, int]]]:
-        # Widen each cell with (year, month) so formatweek can highlight the
-        # right day in year view, where weeks from 12 months are interleaved.
-        # Assumes stdlib only unpacks cells inside formatweek (which we override).
-        weeks = super().monthdays2calendar(year, month)
-        return [[(d, wd, year, month) for (d, wd) in week] for week in weeks]
-
-    def formatweek(  # type: ignore[override]  # ty: ignore[invalid-method-override]
-        self, theweek: list[tuple[int, int, int, int]], width: int
-    ) -> str:
-        return " ".join(
-            self._formatday(d, wd, width, year, month)
-            for (d, wd, year, month) in theweek
-        )
-
-    def _formatday(
-        self, day: int, weekday: int, width: int, year: int, month: int
-    ) -> str:
-        s = self.formatday(day, weekday, width)
-        if self.highlight_day and day and self.highlight_day == (year, month, day):
-            return f"\033[30;43m{s}\033[0m"
-        return s
-
-
-def bsconv(bs_datestring: str) -> None:
-    year, month, day, *_ = map(int, bs_datestring.split("-"))
-    ad = bs_to_ad(year, month, day)
-    ad_tz = datetime.combine(ad, datetime.now().time()).astimezone()
-    print(ad_tz.strftime("%a %b %e %T %Z %Y"))
-
-
-def bsdate(args: Optional[Sequence[str]] = None) -> None:
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-c",
-        required=False,
-        metavar="<bs_date>",
-        help="Convert BS date to AD format",
-        dest="convert",
-    )
-    parser.add_argument(
-        "date",
-        nargs="?",
-        metavar="STRING",
-        help="Convert given datetime string (isoformat/unix-timestamp) to BS format",
-    )
-    opt = parser.parse_args(args)
-    if opt.convert:
-        bsconv(opt.convert)
-        return
-
-    dt: Optional[datetime] = None
-    if opt.date and opt.date.startswith("@"):
-        dt = datetime.fromtimestamp(int(opt.date[1:]))
-    elif opt.date:
-        try:
-            _date = date.fromisoformat(opt.date)
-        except ValueError:
-            dt = datetime.fromisoformat(opt.date)
+def _bs_strftime(  # noqa: C901, PLR0912
+    fmt: str, dt: datetime, year: int, month: int, day: int
+) -> str:
+    """Format a BS date with strftime tokens (BS values for date, AD for time)."""
+    yday = sum(lookup[year][: month - 1]) + day
+    out: list[str] = []
+    i, n = 0, len(fmt)
+    while i < n:
+        if fmt[i] != "%":
+            out.append(fmt[i])
+            i += 1
+            continue
+        j = i + 1
+        while j < n and fmt[j] in "-_0^#":
+            j += 1
+        if j >= n:
+            out.append(fmt[i:])
+            break
+        mods = fmt[i + 1 : j]
+        spec = fmt[j]
+        i = j + 1
+        if spec == "Y":
+            out.append(_pad(year, 4, mods))
+        elif spec == "y":
+            out.append(_pad(year % 100, 2, mods))
+        elif spec == "C":
+            out.append(_pad(year // 100, 2, mods))
+        elif spec == "m":
+            out.append(_pad(month, 2, mods))
+        elif spec == "d":
+            out.append(_pad(day, 2, mods))
+        elif spec == "e":
+            out.append(str(day) if "-" in mods else f"{day:2d}")
+        elif spec == "j":
+            out.append(_pad(yday, 3, mods))
+        elif spec == "B":
+            out.append(months[month - 1])
+        elif spec in ("b", "h"):
+            out.append(months[month - 1][:3])
+        elif spec == "F":
+            out.append(f"{year:04d}-{month:02d}-{day:02d}")
+        elif spec == "D":
+            out.append(f"{month:02d}/{day:02d}/{year % 100:02d}")
+        elif spec == "n":
+            out.append("\n")
+        elif spec == "t":
+            out.append("\t")
+        elif spec == "%":
+            out.append("%")
         else:
-            dt = datetime.combine(_date, datetime.now().time())
-
-    if dt is None:
-        dt = datetime.now()
-    dt = dt.astimezone()
-    year, month, day = ad_to_bs(dt.date())
-    print(dt.strftime("%a"), months[month - 1], day, dt.strftime("%T %Z"), year)
+            out.append(dt.strftime(f"%{mods}{spec}"))
+    return "".join(out)
 
 
-def cal(args: Optional[Sequence[str]] = None) -> None:
-    import argparse
-    import sys
+def _parse_bs(bs_datestring: str) -> tuple[int, int, int]:
+    parts = bs_datestring.split("-")
+    if len(parts) != 3:  # noqa: PLR2004
+        raise ValueError(f"expected YYYY-M-D, got {bs_datestring!r}")  # noqa: TRY003
+    y, m, d = (int(p) for p in parts)
+    return y, m, d
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-w",
-        "--width",
-        type=int,
-        default=2,
-        help="width of date column (default 2)",
-    )
-    parser.add_argument(
-        "-l",
-        "--lines",
-        type=int,
-        default=1,
-        help="number of lines per week (default 1)",
-    )
-    parser.add_argument(
-        "-s",
-        "--spacing",
-        type=int,
-        default=6,
-        help="spacing between months in year view (default 6)",
-    )
-    parser.add_argument(
-        "-m",
-        "--months",
-        type=int,
-        default=3,
-        help="months per row in year view (default 3)",
-    )
-    parser.add_argument(
-        "-f",
-        "--first-weekday",
-        type=int,
-        default=6,
-        help="first day of week, 0=Mon..6=Sun (default 6)",
-    )
-    parser.add_argument(
-        "year",
-        nargs="?",
-        type=int,
-        help=f"year number ({min(lookup)}-{max(lookup)})",
-    )
-    parser.add_argument("month", nargs="?", type=int, help="month number (1-12)")
-    opts = parser.parse_args(args)
-    if opts.year is not None and opts.year not in lookup:
-        parser.error(f"year {opts.year} outside [{min(lookup)}, {max(lookup)}]")
-    if opts.month is not None and not 1 <= opts.month <= 12:  # noqa: PLR2004
-        parser.error(f"month {opts.month} outside [1, 12]")
-    if not 0 <= opts.first_weekday <= 6:  # noqa: PLR2004
-        parser.error(f"first-weekday {opts.first_weekday} outside [0, 6]")
-    year, month, day = ad_to_bs(date.today())
-    cal = CLICalendar(
-        (year, month, day) if sys.stdout.isatty() else None,
-        opts.first_weekday,
-    )
-    if not opts.year or opts.month:
-        result = cal.formatmonth(
-            opts.year or year,
-            opts.month or month,
-            w=opts.width,
-            l=opts.lines,
+
+@dataclass(frozen=True, order=True, slots=True)
+class BSDate:
+    min: ClassVar["BSDate"]
+    max: ClassVar["BSDate"]
+    resolution: ClassVar[timedelta] = timedelta(days=1)
+
+    year: int
+    month: int
+    day: int
+    _ad: date = field(init=False, compare=False, repr=False, hash=False)
+
+    def __post_init__(self) -> None:
+        # bs_to_ad validates; we cache the AD date for downstream operations.
+        object.__setattr__(self, "_ad", bs_to_ad(self.year, self.month, self.day))
+
+    @classmethod
+    def today(cls) -> "BSDate":
+        return cls.from_ad(date.today())
+
+    @classmethod
+    def fromtimestamp(cls, timestamp: float, /) -> "BSDate":
+        return cls.from_ad(date.fromtimestamp(timestamp))
+
+    @classmethod
+    def fromisoformat(cls, date_string: str, /) -> "BSDate":
+        return cls(*_parse_bs(date_string))
+
+    @classmethod
+    def from_ad(cls, ad: date) -> "BSDate":
+        return cls(*ad_to_bs(ad))
+
+    def to_ad(self) -> date:
+        return self._ad
+
+    def replace(
+        self, year: int | None = None, month: int | None = None, day: int | None = None
+    ) -> "BSDate":
+        return type(self)(
+            year if year is not None else self.year,
+            month if month is not None else self.month,
+            day if day is not None else self.day,
         )
-    else:
-        result = cal.formatyear(
-            opts.year,
-            w=opts.width,
-            l=opts.lines,
-            c=opts.spacing,
-            m=opts.months,
-        )
-    print(result)
+
+    def weekday(self) -> int:
+        return self._ad.weekday()
+
+    def isoweekday(self) -> int:
+        return self._ad.isoweekday()
+
+    def isoformat(self) -> str:
+        return f"{self.year:04d}-{self.month:02d}-{self.day:02d}"
+
+    def strftime(self, fmt: str) -> str:
+        dt = datetime.combine(self._ad, time())
+        return _bs_strftime(fmt, dt, self.year, self.month, self.day)
+
+    def __str__(self) -> str:
+        return self.isoformat()
+
+    def __add__(self, other: timedelta) -> "BSDate":
+        if not isinstance(other, timedelta):
+            return NotImplemented
+        return BSDate.from_ad(self._ad + other)
+
+    def __radd__(self, other: timedelta) -> "BSDate":
+        return self.__add__(other)
+
+    def __sub__(self, other: Union[timedelta, "BSDate"]) -> Union["BSDate", timedelta]:
+        if isinstance(other, timedelta):
+            return BSDate.from_ad(self._ad - other)
+        if isinstance(other, BSDate):
+            return self._ad - other._ad
+        return NotImplemented
+
+    def __format__(self, fmt: str, /) -> str:
+        return self.strftime(fmt) if fmt else str(self)
+
+    if sys.version_info >= (3, 13):
+        # PEP 738: copy.replace() dispatches to __replace__ on 3.13+.
+        __replace__ = replace
 
 
-if __name__ == "__main__":
-    cal()
+BSDate.min = BSDate(_first_bs_year, 1, 1)
+BSDate.max = BSDate(_last_bs_year, 12, lookup[_last_bs_year][-1])

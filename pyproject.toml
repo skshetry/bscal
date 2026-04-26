@@ -8,13 +8,13 @@ readme = "README.md"
 description = "Calendar for Bikram Sambat"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = ["Programming Language :: Python :: 3"]
 dynamic = ["version"]
 
 [project.scripts]
-bscal = "bscal:cal"
-bsdate = "bscal:bsdate"
+bscal = "bscal.cal:main"
+bsdate = "bscal.bsdate:main"
 
 [project.urls]
 Issues = "https://github.com/skshetry/bscal/issues"
@@ -28,7 +28,7 @@ dev = [{ include-group = 'tests' }]
 
 [tool.mypy]
 check_untyped_defs = true
-files = ["bscal.py", "tests"]
+files = ["bscal", "tests"]
 strict = true
 
 [tool.ruff]

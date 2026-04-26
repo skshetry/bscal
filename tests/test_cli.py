@@ -1,6 +1,9 @@
 import pytest
 
-from bscal import CLICalendar, bsconv, bsdate, cal
+from bscal.bsdate import bsconv
+from bscal.bsdate import main as bsdate
+from bscal.cal import _CLICalendar as CLICalendar
+from bscal.cal import main as cal
 
 HIGHLIGHT = "\033[30;43m"
 RESET = "\033[0m"
@@ -130,3 +133,56 @@ def test_bsconv(capsys: pytest.CaptureFixture[str]) -> None:
     assert parts[1] == "Apr"
     assert parts[2] == "13"
     assert parts[-1] == "2024"
+
+
+# GNU/BSD date(1) compatibility
+
+
+def test_bsdate_iso_8601_short(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["-I", "2024-04-13T12:34:56"])
+    assert capsys.readouterr().out == "2081-01-01\n"
+
+
+def test_bsdate_iso_8601_attached_seconds(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["-Iseconds", "2024-04-13T12:34:56+05:45"])
+    assert capsys.readouterr().out == "2081-01-01T12:34:56+0545\n"
+
+
+def test_bsdate_iso_8601_long_form(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["--iso-8601=hours", "2024-04-13T12:34:56+05:45"])
+    assert capsys.readouterr().out == "2081-01-01T12+0545\n"
+
+
+def test_bsdate_plus_format_bs_aware(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["+%Y-%m-%d %B %A", "2024-04-13T12:00:00"])
+    assert capsys.readouterr().out == "2081-01-01 Baisakh Saturday\n"
+
+
+def test_bsdate_plus_format_modifiers(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["+%-d %_d %0d %j %F", "2024-04-13"])
+    assert capsys.readouterr().out == "1  1 01 001 2081-01-01\n"
+
+
+def test_bsdate_convert_iso(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["-c", "2081-01-01", "-I"])
+    assert capsys.readouterr().out == "2024-04-13\n"
+
+
+def test_bsdate_convert_plus_format(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["-c", "2081-01-01", "+%F"])
+    assert capsys.readouterr().out == "2024-04-13\n"
+
+
+def test_bsdate_utc_iso(capsys: pytest.CaptureFixture[str]) -> None:
+    bsdate(["-u", "-Iseconds", "2024-04-13T12:34:56+05:45"])
+    assert capsys.readouterr().out == "2081-01-01T06:49:56+0000\n"
+
+
+def test_bsdate_invalid_iso_fmt() -> None:
+    with pytest.raises(SystemExit):
+        bsdate(["-Inanos", "2024-04-13"])
+
+
+def test_bsdate_format_modes_mutually_exclusive() -> None:
+    with pytest.raises(SystemExit):
+        bsdate(["+%F", "-I", "2024-04-13"])

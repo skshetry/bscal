@@ -15,13 +15,13 @@ def test(date: date) -> None:
 
 def test_ad_to_bs_after_range_raises() -> None:
     # BS 2100-12-30 == AD 2044-04-12 is the last supported day.
-    with pytest.raises(ValueError, match="outside of range"):
+    with pytest.raises(ValueError, match=r"date 2044-04-13 outside"):
         ad_to_bs(date(2044, 4, 13))
 
 
 def test_ad_to_bs_before_range_raises() -> None:
     # BS 1970-01-01 == AD 1913-04-13 is the first supported day.
-    with pytest.raises(ValueError, match="outside of range"):
+    with pytest.raises(ValueError, match=r"date 1913-04-12 outside"):
         ad_to_bs(min(new_years.values()) - timedelta(days=1))
 
 
