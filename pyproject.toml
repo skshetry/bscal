@@ -16,6 +16,10 @@ dynamic = ["version"]
 bscal = "bscal:cal"
 bsdate = "bscal:bsdate"
 
+[project.urls]
+Issues = "https://github.com/skshetry/bscal/issues"
+Source = "https://github.com/skshetry/bscal"
+
 [dependency-groups]
 tests = ["pytest", "hypothesis"]
 dev = [{ include-group = 'tests' }]
