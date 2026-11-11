@@ -4,7 +4,7 @@ from itertools import pairwise
 
 import pytest
 
-from bscal import BSDate, lookup
+from bscal import BSDate, _days_in_month, lookup
 from bscal.cal import (
     BAISAKH,
     CHAITRA,
@@ -113,3 +113,9 @@ def test_itermonthdays3_padding_outside_range_raises() -> None:
         list(BSCalendar(0).itermonthdays3(2100, 12))
     # A Sunday-first week needs no padding before Baisakh 1970.
     assert next(BSCalendar(6).itermonthdays3(1970, 1)) == (1970, 1, 1)
+
+
+@pytest.mark.parametrize(("month", "message"), [(0, "month 0"), (13, "month 13")])
+def test_days_in_month_validates_month(month: int, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _days_in_month(2081, month)

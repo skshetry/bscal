@@ -12,11 +12,11 @@ Supported range: BS 1970-01-01 to 2100-12-30 (AD 1913-04-13 to 2044-04-12).
 
 import re
 from bisect import bisect_right
-from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from functools import total_ordering
 from itertools import accumulate, chain
 from operator import index
-from typing import ClassVar, overload
+from typing import TYPE_CHECKING, ClassVar, overload
 
 lookup = {
     # bs_year: [days_in_each_month, ...]
@@ -193,6 +193,13 @@ def _check_year(year: int) -> None:
         raise ValueError(f"year {year} outside [{_first_bs_year}, {_last_bs_year}]")
 
 
+def _days_in_month(year: int, month: int) -> int:
+    _check_year(year)
+    if not 1 <= month <= 12:  # noqa: PLR2004
+        raise ValueError(f"month {month} outside [1, 12]")
+    return lookup[year][month - 1]
+
+
 def bs_to_ad(year: int, month: int, day: int) -> date:
     """Return the AD date of BS `year`-`month`-`day`.
 
@@ -201,10 +208,7 @@ def bs_to_ad(year: int, month: int, day: int) -> date:
     """
     # Like datetime.date: non-integers are a TypeError, not a range error.
     year, month, day = index(year), index(month), index(day)
-    _check_year(year)
-    if not 1 <= month <= 12:  # noqa: PLR2004
-        raise ValueError(f"month {month} outside [1, 12]")
-    days_in_month = lookup[year][month - 1]
+    days_in_month = _days_in_month(year, month)
     if not 1 <= day <= days_in_month:
         raise ValueError(f"day {day} outside [1, {days_in_month}] for {year}-{month}")
     month_index = (year - _first_bs_year) * 12 + month - 1
@@ -217,13 +221,12 @@ def ad_to_bs(ad: date) -> tuple[int, int, int]:
     A datetime is accepted and its time of day ignored. Raise ValueError if
     `ad` is outside the supported range.
     """
-    # date.toordinal(ad), not ad.toordinal(): it raises TypeError, not
-    # AttributeError, if `ad` is not a date.
-    ordinal = date.toordinal(ad)
+    if not isinstance(ad, date):  # a datetime is a date; its time is ignored
+        raise TypeError(f"expected a date, got {type(ad).__name__}")
+    ordinal = ad.toordinal()
     if not _month_ordinals[0] <= ordinal < _month_ordinals[-1]:
         raise ValueError(
-            f"date {date.isoformat(ad)} outside "
-            f"[{_min_ad.isoformat()}, {_max_ad.isoformat()}]"
+            f"date {date.fromordinal(ordinal)} outside [{_min_ad}, {_max_ad}]"
         )
     # The last month that starts on or before `ad` is the one it falls in.
     month_index = bisect_right(_month_ordinals, ordinal) - 1
@@ -291,8 +294,7 @@ def _format_directive(  # noqa: C901, PLR0911, PLR0912
         case "c":  # as in the C locale
             return _bs_strftime("%a %b %e %H:%M:%S %Y", bs, dt)
         case ":z":
-            offset = dt.strftime("%z")  # "+0545", or "+054530" with seconds
-            return ":".join([offset[:3], *re.findall(r"\d\d", offset[3:])])
+            return _colon_offset(dt)
         case "n":
             return "\n"
         case "t":
@@ -303,6 +305,19 @@ def _format_directive(  # noqa: C901, PLR0911, PLR0912
             return dt.strftime(directive[0])
         case _:
             return directive[0]
+
+
+def _colon_offset(dt: datetime) -> str:
+    """Return GNU's %:z: the UTC offset as +hh:mm[:ss], or "" if `dt` is naive."""
+    offset = dt.strftime("%z")  # "+0545", or "+054530" with seconds
+    return ":".join([offset[:3], *re.findall(r"\d\d", offset[3:])])
+
+
+def _ad_strftime(fmt: str, dt: datetime) -> str:
+    """datetime.strftime, plus GNU's %:z on every Python version."""
+    return _DIRECTIVE.sub(
+        lambda m: _colon_offset(dt) if m[2] == ":z" else dt.strftime(m[0]), fmt
+    )
 
 
 def _bs_strftime(fmt: str, bs: "BSDate", dt: datetime) -> str:
@@ -323,32 +338,79 @@ def _parse_bs(bs_datestring: str) -> tuple[int, int, int]:
     return year, month, day
 
 
-@dataclass(frozen=True, order=True, slots=True)
+@total_ordering
 class BSDate:
     """A Bikram Sambat date, with the interface of datetime.date.
 
-    Supports timedelta arithmetic, subtraction of two BSDates, ordering,
-    hashing, pickling, isoformat()/fromisoformat() and strftime().
+    Immutable. Supports timedelta arithmetic, subtraction of two BSDates,
+    ordering, hashing, pickling, isoformat()/fromisoformat() and strftime().
     """
+
+    # Written by hand rather than as a dataclass: importing dataclasses costs
+    # about 5 ms, a quarter of the CLI's startup time.
+    __slots__ = ("_ad", "day", "month", "year")
+    __match_args__ = ("year", "month", "day")
 
     min: ClassVar["BSDate"]
     max: ClassVar["BSDate"]
     resolution: ClassVar[timedelta] = timedelta(days=1)
 
-    year: int
-    month: int
-    day: int
-    _ad: date = field(init=False, compare=False, repr=False, hash=False)
+    if TYPE_CHECKING:
+        # Read-only to type checkers; __setattr__ enforces it at runtime.
+        @property
+        def year(self) -> int: ...
+        @property
+        def month(self) -> int: ...
+        @property
+        def day(self) -> int: ...
+        @property
+        def _ad(self) -> date: ...
 
-    def __post_init__(self) -> None:
-        # Store plain ints, as datetime.date does: not a bool or a Month member,
-        # which would show in repr() and, on 3.10, in strftime("%-m").
-        year, month, day = index(self.year), index(self.month), index(self.day)
+    def __init__(self, year: int, month: int, day: int) -> None:
+        # Store plain ints, as datetime.date does: not a bool or a Month member.
+        year, month, day = index(year), index(month), index(day)
+        ad = bs_to_ad(year, month, day)  # validates
         object.__setattr__(self, "year", year)
         object.__setattr__(self, "month", month)
         object.__setattr__(self, "day", day)
-        # bs_to_ad validates; we cache the AD date for downstream operations.
-        object.__setattr__(self, "_ad", bs_to_ad(year, month, day))
+        object.__setattr__(self, "_ad", ad)  # cached for conversions and arithmetic
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"cannot assign to field {name!r}")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"cannot delete field {name!r}")
+
+    def __reduce__(self) -> tuple[type["BSDate"], tuple[int, int, int]]:
+        # Pickle only the BS date, so the AD date is recomputed (and the date
+        # revalidated) against the current table when unpickled.
+        return type(self), (self.year, self.month, self.day)
+
+    def __setstate__(self, state: list[object]) -> None:
+        # Unpickle data from older versions, where BSDate was a dataclass and
+        # pickled [year, month, day, ad]; the AD date is recomputed.
+        year, month, day = state[:3]
+        self.__init__(year, month, day)  # type: ignore[misc]
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__qualname__}"
+            f"(year={self.year}, month={self.month}, day={self.day})"
+        )
+
+    def __eq__(self, other: object) -> bool:
+        # isinstance, like datetime.date: subclasses compare equal to BSDate.
+        if not isinstance(other, BSDate):
+            return NotImplemented
+        return self._ad == other._ad
+
+    def __lt__(self, other: "BSDate") -> bool:
+        if not isinstance(other, BSDate):
+            return NotImplemented
+        return self._ad < other._ad
+
+    def __hash__(self) -> int:
+        return hash(self._ad)
 
     @classmethod
     def today(cls) -> "BSDate":

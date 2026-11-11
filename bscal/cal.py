@@ -4,7 +4,7 @@ import calendar
 from collections.abc import Iterator, Sequence
 from enum import IntEnum
 
-from . import BSDate, _check_year, bs_to_ad, lookup, months
+from . import BSDate, _check_year, _days_in_month, bs_to_ad, lookup, months
 
 
 class Month(IntEnum):
@@ -43,11 +43,6 @@ month_name = ("", *months)
 month_abbr = ("", *(name[:3] for name in months))
 
 
-def _monthlen(year: int, month: int) -> int:
-    _check_year(year)
-    return lookup[year][month - 1]
-
-
 def isleap(year: int) -> bool:
     """Return True if `year` is a 366-day BS year."""
     _check_year(year)
@@ -66,7 +61,7 @@ def weekday(year: int, month: int, day: int) -> int:
 
 def monthrange(year: int, month: int) -> tuple[int, int]:
     """Return (weekday_of_1st, days_in_month) for BS year/month."""
-    return weekday(year, month, 1), _monthlen(year, month)
+    return weekday(year, month, 1), _days_in_month(year, month)
 
 
 class BSCalendar(calendar.TextCalendar):
@@ -106,7 +101,7 @@ class BSCalendar(calendar.TextCalendar):
         days_before, ndays, days_after = self._padding(year, month)
         if days_before:  # the last days of the previous month
             y, m = (year, month - 1) if month > BAISAKH else (year - 1, CHAITRA)
-            end = _monthlen(y, m) + 1  # also rejects years outside the table
+            end = _days_in_month(y, m) + 1  # also rejects years outside the table
             for d in range(end - days_before, end):
                 yield y, m, d
         for d in range(1, ndays + 1):
@@ -228,23 +223,26 @@ def main(args: Sequence[str] | None = None) -> None:
         parser.error(f"first-weekday {opts.first_weekday} outside [0, 6]")
     if opts.months < 1:
         parser.error(f"months {opts.months} must be at least 1")
-    today = BSDate.today()
-    highlight_day = (today.year, today.month, today.day)
+    try:
+        today: BSDate | None = BSDate.today()
+    except ValueError as e:  # today is outside the supported range
+        if opts.year is None:
+            parser.error(f"cannot show the current month: {e}")
+        today = None
+    highlight_day = (today.year, today.month, today.day) if today else None
     cal = _CLICalendar(
         highlight_day=highlight_day if should_use_color() else None,
         firstweekday=opts.first_weekday,
     )
-    if opts.year is not None and opts.month is None:  # `bscal 2080`
+    if opts.year is None:  # `bscal`: the current month
+        assert today is not None  # see parser.error above
+        result = cal.formatmonth(today.year, today.month, w=opts.width, l=opts.lines)
+    elif opts.month is None:  # `bscal 2080`
         result = cal.formatyear(
             opts.year, w=opts.width, l=opts.lines, c=opts.spacing, m=opts.months
         )
-    else:  # `bscal` or `bscal 2080 9`
-        result = cal.formatmonth(
-            opts.year or today.year,
-            opts.month or today.month,
-            w=opts.width,
-            l=opts.lines,
-        )
+    else:  # `bscal 2080 9`
+        result = cal.formatmonth(opts.year, opts.month, w=opts.width, l=opts.lines)
     print(result)
 
 

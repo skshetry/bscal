@@ -3,9 +3,9 @@
 from collections.abc import Sequence
 from datetime import date, datetime, timezone, tzinfo
 
-from . import BSDate, _bs_strftime
+from . import BSDate, _ad_strftime, _bs_strftime
 
-# -I[FMT] formats for BS dates, matching GNU and BSD date (offset as +hh:mm).
+# -I[FMT] formats, matching GNU and BSD date (offset as +hh:mm).
 _ISO_FORMATS = {
     "date": "%Y-%m-%d",
     "hours": "%Y-%m-%dT%H%:z",
@@ -46,11 +46,8 @@ def _bs_to_ad_datetime(bs_datestring: str, *, utc: bool) -> datetime:
 
 
 def _format_ad(ad_dt: datetime, user_format: str | None, iso_fmt: str | None) -> str:
-    if iso_fmt == "date":
-        return ad_dt.date().isoformat()
-    if iso_fmt is not None:  # "hours", "minutes" or "seconds"
-        return ad_dt.isoformat(timespec=iso_fmt)
-    return ad_dt.strftime(user_format or _DEFAULT_AD_FORMAT)
+    fmt = _ISO_FORMATS[iso_fmt] if iso_fmt is not None else user_format
+    return _ad_strftime(fmt or _DEFAULT_AD_FORMAT, ad_dt)
 
 
 def bsconv(bs_datestring: str, iso: bool = False) -> None:

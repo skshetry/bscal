@@ -3,6 +3,7 @@ import time
 
 import pytest
 
+from bscal import BSDate
 from bscal.bsdate import bsconv
 from bscal.bsdate import main as bsdate
 from bscal.cal import _CLICalendar
@@ -272,6 +273,7 @@ def test_version(capsys: pytest.CaptureFixture[str]) -> None:
         (["-u", "-Iseconds", "2024-04-13T03:00+05:45"], "2080-12-30T21:15:00+00:00"),
     ],
 )
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="time.tzset() is Unix-only")
 def test_bsdate_utc_input(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -297,3 +299,25 @@ def test_bsdate_gnu_flags(
 ) -> None:
     bsdate([fmt, "2024-04-13"])
     assert capsys.readouterr().out == expected + "\n"
+
+
+def test_bsdate_convert_colon_z(capsys: pytest.CaptureFixture[str]) -> None:
+    # %:z works for AD output too, even before Python 3.12's strftime has it.
+    bsdate(["-u", "-c", "2081-01-01", "+%F %:z"])
+    assert capsys.readouterr().out == "2024-04-13 +00:00\n"
+
+
+def _today_out_of_range(_cls: type[BSDate]) -> BSDate:
+    raise ValueError("date 2044-04-13 outside [1913-04-13, 2044-04-12]")
+
+
+def test_bscal_works_when_today_is_out_of_range(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(BSDate, "today", classmethod(_today_out_of_range))
+    cal(["2080", "9"])
+    assert capsys.readouterr().out == results_2080_poush
+    with pytest.raises(SystemExit) as exc_info:
+        cal([])
+    assert exc_info.value.code == 2
+    assert "cannot show the current month: date 2044-04-13" in capsys.readouterr().err

@@ -96,6 +96,30 @@ def test_ordering_chronological() -> None:
     ]
 
 
+def test_subclass_compares_with_base_class() -> None:
+    class MyDate(BSDate):
+        pass
+
+    assert MyDate(2081, 1, 1) == BSDate(2081, 1, 1)
+    assert hash(MyDate(2081, 1, 1)) == hash(BSDate(2081, 1, 1))
+    assert MyDate(2081, 1, 1) < BSDate(2081, 1, 2)
+    assert BSDate(2081, 1, 2) >= MyDate(2081, 1, 1)
+
+
+def test_comparison_with_other_types() -> None:
+    assert BSDate(2081, 1, 1) != (2081, 1, 1)
+    with pytest.raises(TypeError):
+        _ = BSDate(2081, 1, 1) < (2081, 1, 2)  # type: ignore[operator]
+
+
+def test_repr_and_match() -> None:
+    bd = BSDate(2081, 1, 1)
+    assert repr(bd) == "BSDate(year=2081, month=1, day=1)"
+    match bd:
+        case BSDate(year, month, day):
+            assert (year, month, day) == (2081, 1, 1)
+
+
 def test_hashable() -> None:
     s = {BSDate(2081, 1, 1), BSDate(2081, 1, 1), BSDate(2081, 1, 2)}
     assert len(s) == 2
@@ -104,7 +128,10 @@ def test_hashable() -> None:
 def test_immutable() -> None:
     bd = BSDate(2081, 1, 1)
     with pytest.raises(AttributeError):
-        # frozen=True raises FrozenInstanceError (an AttributeError subclass).
+        del bd.day
+    with pytest.raises(AttributeError):
+        bd.extra = 1
+    with pytest.raises(AttributeError):
         bd.year = 2080  # type: ignore[misc]  # ty: ignore[invalid-assignment]
 
 
@@ -160,12 +187,26 @@ def test_strftime_unknown_directive_printed_as_is(directive: str) -> None:
 
 
 @pytest.mark.parametrize("protocol", range(pickle.HIGHEST_PROTOCOL + 1))
-def test_pickle_round_trip_preserves_cache(protocol: int) -> None:
+def test_pickle_round_trip(protocol: int) -> None:
     bd = BSDate(2081, 1, 1)
-    bd2 = pickle.loads(pickle.dumps(bd, protocol=protocol))
+    data = pickle.dumps(bd, protocol=protocol)
+    assert b"datetime" not in data  # only the BS date; the AD date is recomputed
+    bd2 = pickle.loads(data)
     assert bd2 == bd
     assert hash(bd2) == hash(bd)
     assert bd2.to_ad() == date(2024, 4, 13)
+
+
+def test_unpickle_from_dataclass_version() -> None:
+    # Written by bscal 0.0.8, where BSDate was a dataclass (protocol 5).
+    data = (
+        b"\x80\x05\x95B\x00\x00\x00\x00\x00\x00\x00\x8c\x05bscal\x94\x8c\x06BSDate"
+        b"\x94\x93\x94)\x81\x94]\x94(M!\x08K\x01K\x01\x8c\x08datetime\x94\x8c\x04date"
+        b"\x94\x93\x94C\x04\x07\xe8\x04\r\x94\x85\x94R\x94eb."
+    )
+    bd = pickle.loads(data)
+    assert bd == BSDate(2081, 1, 1)
+    assert bd.to_ad() == date(2024, 4, 13)
 
 
 def test_deepcopy() -> None:
