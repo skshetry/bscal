@@ -1,8 +1,10 @@
+"""Calendar functions for Bikram Sambat, mirroring the stdlib calendar module."""
+
 import calendar
 from collections.abc import Iterator, Sequence
 from enum import IntEnum
 
-from . import BSDate, bs_to_ad, lookup
+from . import BSDate, _check_year, bs_to_ad, lookup, months
 
 
 class Month(IntEnum):
@@ -36,10 +38,35 @@ class Month(IntEnum):
 ) = Month
 
 
-# 1-indexed BS month names, mirroring stdlib calendar.month_name. Derived from
-# the Month enum so the enum is the single source of truth for BS month names.
-month_name = ("", *(m.name.title() for m in Month))
-month_abbr = ("", *(m.name[:3].title() for m in Month))
+# 1-indexed BS month names, mirroring stdlib calendar.month_name/month_abbr.
+month_name = ("", *months)
+month_abbr = ("", *(name[:3] for name in months))
+
+
+def _monthlen(year: int, month: int) -> int:
+    _check_year(year)
+    return lookup[year][month - 1]
+
+
+def isleap(year: int) -> bool:
+    """Return True if `year` is a 366-day BS year."""
+    _check_year(year)
+    return sum(lookup[year]) == 366  # noqa: PLR2004
+
+
+def leapdays(y1: int, y2: int) -> int:
+    """Return the number of BS leap years in [y1, y2)."""
+    return sum(1 for y in range(y1, y2) if isleap(y))
+
+
+def weekday(year: int, month: int, day: int) -> int:
+    """Return weekday (Mon=0..Sun=6) of BS year/month/day."""
+    return bs_to_ad(year, month, day).weekday()
+
+
+def monthrange(year: int, month: int) -> tuple[int, int]:
+    """Return (weekday_of_1st, days_in_month) for BS year/month."""
+    return weekday(year, month, 1), _monthlen(year, month)
 
 
 class BSCalendar(calendar.TextCalendar):
@@ -52,14 +79,55 @@ class BSCalendar(calendar.TextCalendar):
             s = f"{s} {theyear}"
         return s.center(width)
 
-    def itermonthdays(self, year: int, month: int) -> Iterator[int]:
-        """Like itermonthdates(), but yields day numbers (0 outside month)."""
+    def _padding(self, year: int, month: int) -> tuple[int, int, int]:
+        """Return (days_before, days_in_month, days_after) for the month's grid.
+
+        The grid shows whole weeks starting on self.firstweekday, so the days
+        before and after the month fill its first and last week.
+        """
         day1, ndays = monthrange(year, month)
         days_before = (day1 - self.firstweekday) % 7
         days_after = (self.firstweekday - day1 - ndays) % 7
+        return days_before, ndays, days_after
+
+    def itermonthdays(self, year: int, month: int) -> Iterator[int]:
+        """Like itermonthdates(), but yields day numbers (0 outside month)."""
+        days_before, ndays, days_after = self._padding(year, month)
         yield from [0] * days_before
         yield from range(1, ndays + 1)
         yield from [0] * days_after
+
+    def itermonthdays3(self, year: int, month: int) -> Iterator[tuple[int, int, int]]:
+        """Like itermonthdates(), but yields BS (year, month, day) tuples.
+
+        Raises ValueError if the padding days fall in a year outside the
+        supported range, as their month lengths are unknown.
+        """
+        days_before, ndays, days_after = self._padding(year, month)
+        if days_before:  # the last days of the previous month
+            y, m = (year, month - 1) if month > BAISAKH else (year - 1, CHAITRA)
+            end = _monthlen(y, m) + 1  # also rejects years outside the table
+            for d in range(end - days_before, end):
+                yield y, m, d
+        for d in range(1, ndays + 1):
+            yield year, month, d
+        if days_after:  # the first days of the next month
+            y, m = (year, month + 1) if month < CHAITRA else (year + 1, BAISAKH)
+            _check_year(y)  # day numbers need no table, but the year must exist
+            for d in range(1, days_after + 1):
+                yield y, m, d
+
+    def itermonthdates(  # type: ignore[override]  # ty: ignore[invalid-method-override]
+        self, year: int, month: int
+    ) -> Iterator[BSDate]:
+        """Like the stdlib method, but yields BSDate values.
+
+        BSDate is not a datetime.date subclass, so this deliberately narrows
+        the stdlib return type. The inherited monthdatescalendar() and
+        yeardatescalendar() call this method, so they return BSDate values too.
+        """
+        for y, m, d in self.itermonthdays3(year, month):
+            yield BSDate(y, m, d)
 
 
 class _CLICalendar(BSCalendar):
@@ -84,41 +152,22 @@ class _CLICalendar(BSCalendar):
         self, theweek: list[tuple[int, int, int, int]], width: int
     ) -> str:
         return " ".join(
-            self._formatday(d, wd, width, year, month)
+            self._formatcell(d, wd, width, year, month)
             for (d, wd, year, month) in theweek
         )
 
-    def _formatday(
+    def _formatcell(
         self, day: int, weekday: int, width: int, year: int, month: int
     ) -> str:
+        """formatday(), highlighted if (year, month, day) is highlight_day."""
         s = self.formatday(day, weekday, width)
-        if self.highlight_day and day and self.highlight_day == (year, month, day):
+        if self.highlight_day == (year, month, day):
             return f"\033[30;43m{s}\033[0m"
         return s
 
 
-def isleap(year: int) -> bool:
-    """Return True if `year` is a 366-day BS year."""
-    return sum(lookup[year]) == 366  # noqa: PLR2004
-
-
-def leapdays(y1: int, y2: int) -> int:
-    """Return the number of BS leap years in [y1, y2)."""
-    return sum(1 for y in range(y1, y2) if isleap(y))
-
-
-def weekday(year: int, month: int, day: int) -> int:
-    """Return weekday (Mon=0..Sun=6) of BS year/month/day."""
-    return bs_to_ad(year, month, day).weekday()
-
-
-def monthrange(year: int, month: int) -> tuple[int, int]:
-    """Return (weekday_of_1st, days_in_month) for BS year/month."""
-    return weekday(year, month, 1), lookup[year][month - 1]
-
-
 def main(args: Sequence[str] | None = None) -> None:
-    from ._cli import _should_use_color, make_parser
+    from ._cli import make_parser, should_use_color
 
     parser = make_parser(
         epilog=(
@@ -173,29 +222,28 @@ def main(args: Sequence[str] | None = None) -> None:
     opts = parser.parse_args(args)
     if opts.year is not None and not BSDate.min.year <= opts.year <= BSDate.max.year:
         parser.error(f"year {opts.year} outside [{BSDate.min.year}, {BSDate.max.year}]")
-    if opts.month is not None and not 1 <= opts.month <= 12:  # noqa: PLR2004
+    if opts.month is not None and not BAISAKH <= opts.month <= CHAITRA:
         parser.error(f"month {opts.month} outside [1, 12]")
-    if not 0 <= opts.first_weekday <= 6:  # noqa: PLR2004
+    if not calendar.MONDAY <= opts.first_weekday <= calendar.SUNDAY:
         parser.error(f"first-weekday {opts.first_weekday} outside [0, 6]")
+    if opts.months < 1:
+        parser.error(f"months {opts.months} must be at least 1")
     today = BSDate.today()
+    highlight_day = (today.year, today.month, today.day)
     cal = _CLICalendar(
-        (today.year, today.month, today.day) if _should_use_color() else None,
-        opts.first_weekday,
+        highlight_day=highlight_day if should_use_color() else None,
+        firstweekday=opts.first_weekday,
     )
-    if not opts.year or opts.month:
+    if opts.year is not None and opts.month is None:  # `bscal 2080`
+        result = cal.formatyear(
+            opts.year, w=opts.width, l=opts.lines, c=opts.spacing, m=opts.months
+        )
+    else:  # `bscal` or `bscal 2080 9`
         result = cal.formatmonth(
             opts.year or today.year,
             opts.month or today.month,
             w=opts.width,
             l=opts.lines,
-        )
-    else:
-        result = cal.formatyear(
-            opts.year,
-            w=opts.width,
-            l=opts.lines,
-            c=opts.spacing,
-            m=opts.months,
         )
     print(result)
 

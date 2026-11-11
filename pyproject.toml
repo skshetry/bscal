@@ -21,7 +21,7 @@ Issues = "https://github.com/skshetry/bscal/issues"
 Source = "https://github.com/skshetry/bscal"
 
 [dependency-groups]
-tests = ["pytest", "hypothesis"]
+tests = ["pytest"]
 dev = [{ include-group = 'tests' }]
 
 [tool.setuptools_scm]
@@ -49,8 +49,13 @@ ignore = [
     "D2",
     "DTZ",
     "COM",
+    "TRY003", # stdlib-style ValueError messages; EM is ignored too
+    "CPY",
 ]
 select = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S301", "SLF001"]
 
 [tool.ruff.format]
 preview = true

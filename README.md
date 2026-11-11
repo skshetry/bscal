@@ -30,7 +30,7 @@ Tue Poush 17 09:14:14 +0545 2080
 $ bsdate 2016-09-08               # AD date
 Thu Bhadra 23 09:17:21 +0545 2073
 
-$ bsdate 1473305798               # unix timestamp
+$ bsdate @1473305798              # unix timestamp
 Thu Bhadra 23 09:21:38 +0545 2073
 
 $ bsdate -c 2073-05-23            # BS to AD
@@ -42,8 +42,9 @@ BS-aware strftime, `-u` for UTC.
 
 ### Python
 
-`BSDate` is a `datetime.date` for Bikram Sambat. Same constructors,
-accessors, arithmetic, ordering. `strftime` tokens are BS-aware.
+`BSDate` works like `datetime.date` for Bikram Sambat (it is not a subclass):
+`today`, `fromtimestamp`, `fromisoformat`, `replace`, `weekday`, `isoformat`,
+arithmetic with `timedelta`, and ordering. `strftime` date tokens give BS values.
 
 ```python
 from datetime import date
@@ -53,7 +54,7 @@ BSDate.today()
 BSDate.fromisoformat("2081-01-01")
 BSDate.from_ad(date(2024, 4, 13)).to_ad()
 
-bs_to_ad(2081, 1, 1)         # (y, m, d) -> date
+bs_to_ad(2081, 1, 1)  # (y, m, d) -> date
 ad_to_bs(date(2024, 4, 13))  # date -> (y, m, d)
 ```
 
