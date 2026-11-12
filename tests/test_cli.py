@@ -6,9 +6,11 @@ import pytest
 from bscal import BSDate
 from bscal.bsdate import bsconv
 from bscal.bsdate import main as bsdate
-from bscal.cal import _CLICalendar
+from bscal.cal import BSCalendar, _CLICalendar
 from bscal.cal import main as cal
 
+BOLD = "\033[1m"
+CYAN = "\033[36m"
 HIGHLIGHT = "\033[30;43m"
 RESET = "\033[0m"
 
@@ -81,22 +83,51 @@ def test_bscal_output(
     assert not err
 
 
-def test_month_view_highlights_target_day_only() -> None:
+def test_month_view_highlights_target_day_and_month_name() -> None:
     out = _CLICalendar(highlight_day=(2080, 9, 5), firstweekday=6).formatmonth(2080, 9)
     assert f"{HIGHLIGHT} 5{RESET}" in out
-    assert out.count(HIGHLIGHT) == 1
+    assert f"{HIGHLIGHT}Poush 2080{RESET}" in out
+    assert out.count(HIGHLIGHT) == 2
+    assert f"{CYAN}Su Mo Tu We Th Fr Sa{RESET}" in out
 
 
 def test_year_view_highlights_only_in_target_month() -> None:
     # Day 5 also exists in every other month — verify only Poush 5 is highlighted.
     out = _CLICalendar(highlight_day=(2080, 9, 5), firstweekday=6).formatyear(2080)
-    assert out.count(HIGHLIGHT) == 1
+    assert out.count(HIGHLIGHT) == 2
     assert f"{HIGHLIGHT} 5{RESET}" in out
+    assert f"{HIGHLIGHT}Poush{RESET}" in out
+    assert out.lstrip().startswith(f"{BOLD}2080{RESET}")  # the year
+    assert out.count(f"{BOLD}") == 12  # the year and 11 other month names
+
+
+def test_year_view_columns_stay_aligned() -> None:
+    plain = BSCalendar(6).formatyear(2080)
+    colored = _CLICalendar(highlight_day=(2080, 9, 5), firstweekday=6).formatyear(2080)
+    assert re.sub(r"\033\[[0-9;]*m", "", colored) == plain
 
 
 def test_no_highlight_when_unset() -> None:
     out = _CLICalendar(highlight_day=None, firstweekday=6).formatmonth(2080, 9)
     assert HIGHLIGHT not in out
+    assert f"     {BOLD}Poush 2080{RESET}" in out
+
+
+def test_bscal_plain_without_color(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    cal(["2080", "9"])
+    assert "\033" not in capsys.readouterr().out
+
+
+def test_bscal_colored_with_force_color(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    cal(["2080", "9"])
+    assert f"{CYAN}Su Mo Tu We Th Fr Sa{RESET}" in capsys.readouterr().out
 
 
 # AD 2024-04-13 == BS 2081-01-01 (Baisakh 1, a Saturday)

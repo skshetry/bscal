@@ -125,7 +125,29 @@ class BSCalendar(calendar.TextCalendar):
             yield BSDate(y, m, d)
 
 
+# Terminal styles, as `python -m calendar` uses them on Python 3.14+.
+_BOLD = "\033[1m"
+_CYAN = "\033[36m"
+_HIGHLIGHT = "\033[30;43m"  # black on yellow
+_RESET = "\033[0m"
+
+
+def _style(text: str, style: str) -> str:
+    """Style the words in `text`, leaving its padding unstyled.
+
+    Stdlib's rstrip() and centering of rows then still work as for plain text.
+    """
+    words = text.strip()
+    return text.replace(words, f"{style}{words}{_RESET}", 1)
+
+
 class _CLICalendar(BSCalendar):
+    """BSCalendar for a color terminal, styled like `python -m calendar`.
+
+    The year and month names are bold, the weekday header cyan, and today's
+    date and its month name highlighted.
+    """
+
     def __init__(
         self,
         highlight_day: tuple[int, int, int] | None = None,
@@ -143,6 +165,22 @@ class _CLICalendar(BSCalendar):
         weeks = super().monthdays2calendar(year, month)
         return [[(d, wd, year, month) for (d, wd) in week] for week in weeks]
 
+    def formatyear(self, theyear: int, *args: int, **kwargs: int) -> str:
+        # The year is on the first line; month names and weeks style themselves.
+        output = super().formatyear(theyear, *args, **kwargs)
+        year, newline, rest = output.partition("\n")
+        return f"{_style(year, _BOLD)}{newline}{rest}"
+
+    def formatmonthname(
+        self, theyear: int, themonth: int, width: int, withyear: bool = True
+    ) -> str:
+        name = super().formatmonthname(theyear, themonth, width, withyear)
+        is_current = (theyear, themonth) == (self.highlight_day or ())[:2]
+        return _style(name, _HIGHLIGHT if is_current else _BOLD)
+
+    def formatweekheader(self, width: int) -> str:
+        return f"{_CYAN}{super().formatweekheader(width)}{_RESET}"
+
     def formatweek(  # type: ignore[override]  # ty: ignore[invalid-method-override]
         self, theweek: list[tuple[int, int, int, int]], width: int
     ) -> str:
@@ -157,7 +195,7 @@ class _CLICalendar(BSCalendar):
         """formatday(), highlighted if (year, month, day) is highlight_day."""
         s = self.formatday(day, weekday, width)
         if self.highlight_day == (year, month, day):
-            return f"\033[30;43m{s}\033[0m"
+            return f"{_HIGHLIGHT}{s}{_RESET}"
         return s
 
 
@@ -229,10 +267,13 @@ def main(args: Sequence[str] | None = None) -> None:
         if opts.year is None:
             parser.error(f"cannot show the current month: {e}")
         today = None
-    highlight_day = (today.year, today.month, today.day) if today else None
-    cal = _CLICalendar(
-        highlight_day=highlight_day if should_use_color() else None,
-        firstweekday=opts.first_weekday,
+    cal = (
+        _CLICalendar(
+            highlight_day=(today.year, today.month, today.day) if today else None,
+            firstweekday=opts.first_weekday,
+        )
+        if should_use_color()
+        else BSCalendar(opts.first_weekday)
     )
     if opts.year is None:  # `bscal`: the current month
         assert today is not None  # see parser.error above
